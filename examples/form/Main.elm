@@ -38,6 +38,7 @@ update msg model =
 view : Model -> Html.Html Msg
 view model =
     JsonSchema.Form.view model.form
+        |> Html.map SchemaFormMsg
 
 
 init : Model
