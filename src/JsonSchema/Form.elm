@@ -5,12 +5,13 @@ import Html.Attributes
 import Html.Events
 import Json.Decode exposing (Value)
 import Json.Encode
-import Json.Pointer
+import Json.Patch as Patch
+import Json.Pointer exposing (Pointer)
 import JsonSchema
 import JsonSchema.Decoder
 import JsonSchema.Encoder
 import JsonSchema.Model
-import JsonSchema.Validator
+import JsonSchema.Validator as Validator
 
 
 type alias Model =
@@ -20,7 +21,7 @@ type alias Model =
 
 
 type Json
-    = ValidJson Value (List JsonSchema.Validator.Error)
+    = ValidJson Value (List Validator.Error)
     | InvalidJson InvalidText
 
 
@@ -41,7 +42,11 @@ stringToJson schema string =
         toJson result =
             case result of
                 Ok value ->
-                    ValidJson value <| JsonSchema.Validator.validate schema value
+                    let
+                        ( validatedValue, errors ) =
+                            validateJson schema value
+                    in
+                    ValidJson validatedValue errors
 
                 Err errorMessage ->
                     InvalidJson { intendedText = string, errorMessage = errorMessage }
@@ -49,6 +54,13 @@ stringToJson schema string =
     string
         |> Json.Decode.decodeString Json.Decode.value
         |> toJson
+
+
+validateJson : JsonSchema.Schema -> Value -> ( Value, List Validator.Error )
+validateJson schema value =
+    ( value
+    , Validator.validate schema value
+    )
 
 
 init : JsonSchema.Schema -> String -> Model
@@ -59,6 +71,7 @@ init schema jsonString =
 type Msg
     = SchemaChange String
     | DirectJsonChange String
+    | PatchJson Pointer String
     | NoOp
 
 
@@ -93,11 +106,37 @@ update msg model =
                 InvalidSchema _ ->
                     model ! []
 
+        PatchJson pointer newString ->
+            let
+                newJson =
+                    case model.json of
+                        ValidJson validJson errors ->
+                            let
+                                patchResult =
+                                    Patch.apply
+                                        [ newString
+                                            |> Json.Encode.string
+                                            |> Patch.Replace pointer
+                                        ]
+                                        validJson
+                            in
+                            case patchResult of
+                                Ok result ->
+                                    Json.Encode.encode 2 result
+
+                                Err err ->
+                                    Json.Encode.encode 2 validJson
+
+                        InvalidJson invalid ->
+                            invalid.intendedText
+            in
+            update (DirectJsonChange newJson) model
+
         NoOp ->
             model ! []
 
 
-rootPointer : Json.Pointer.Pointer
+rootPointer : Pointer
 rootPointer =
     []
 
@@ -105,7 +144,7 @@ rootPointer =
 view : Model -> Html Msg
 view model =
     Html.div []
-        [ schemaView rootPointer model.schema model.json
+        [ viewForm rootPointer model.schema model.json
         , viewSchemaTextarea model.schema
         , viewJsonOutput model.json
         ]
@@ -119,6 +158,7 @@ viewSchemaTextarea schema =
                 [ Html.textarea
                     [ Html.Events.onInput SchemaChange
                     , Html.Attributes.value <| JsonSchema.Encoder.encode schema
+                    , textareaSize
                     ]
                     []
                 ]
@@ -129,6 +169,7 @@ viewSchemaTextarea schema =
                 , Html.textarea
                     [ Html.Events.onInput SchemaChange
                     , Html.Attributes.value intendedText
+                    , textareaSize
                     ]
                     []
                 ]
@@ -139,10 +180,10 @@ viewJsonOutput json =
     case json of
         ValidJson json errors ->
             Html.div []
-                [ Html.div [] [ Html.text <| toString errors ]
-                , Html.textarea
+                [ Html.textarea
                     [ Html.Events.onInput DirectJsonChange
                     , Html.Attributes.value <| Json.Encode.encode 2 json
+                    , textareaSize
                     ]
                     []
                 ]
@@ -154,60 +195,63 @@ viewJsonOutput json =
                 , Html.textarea
                     [ Html.Events.onInput DirectJsonChange
                     , Html.Attributes.value <| intendedText
+                    , textareaSize
                     ]
                     []
                 ]
 
 
-schemaView : Json.Pointer.Pointer -> Schema -> Json -> Html msg
-schemaView pointer schema json =
-    Html.text "THis will be the form"
-
-
-
--- let
---     schema =
---         case probablySchema of
---             ValidSchema s ->
---                 s
---             Invalid s ->
---                 --TODO THis is obv garbage
---                 JsonSchema.string [ JsonSchema.title "sup" ]
--- in
--- case ( JsonSchema.Validator.getValidatedValue [] schema value, schema ) of
---     ( JsonSchema.Validator.Invalid errorList, _ ) ->
---         Html.text "notImplemented"
---     ( JsonSchema.Validator.StringValue string, JsonSchema.Model.String stringSchema ) ->
---         stringView stringSchema string pointer
---     ( JsonSchema.Validator.StringValue string, _ ) ->
---         Html.text "WTF?"
---     ( JsonSchema.Validator.ArrayValue arrayOfValues, _ ) ->
---         Html.text "notImplemented"
---     ( JsonSchema.Validator.TupleValue arrayOfValues, _ ) ->
---         Html.text "notImplemented"
---     ( JsonSchema.Validator.ObjectValue objectOfValues, _ ) ->
---         Html.text "notImplemented"
---     ( JsonSchema.Validator.BoolValue bool, _ ) ->
---         Html.text "notImplemented"
---     ( JsonSchema.Validator.FloatValue float, _ ) ->
---         Html.text "notImplemented"
---     ( JsonSchema.Validator.IntValue int, _ ) ->
---         Html.text "notImplemented"
---     ( JsonSchema.Validator.LazyValue lazy, _ ) ->
---         Html.text "notImplemented"
---     ( JsonSchema.Validator.Valid _, _ ) ->
---         Html.text "notImplemented"
-
-
-stringView : JsonSchema.Model.StringSchema -> String -> Json.Pointer.Pointer -> Html msg
-stringView stringSchema string pointer =
-    Html.div []
-        [ viewJust label stringSchema.title
-        , Html.input [ Html.Attributes.value string ] []
+textareaSize : Html.Attribute msg
+textareaSize =
+    Html.Attributes.style
+        [ ( "height", "300px" )
+        , ( "width", "200px" )
         ]
 
 
-label : String -> Html msg
+viewForm : Pointer -> Schema -> Json -> Html Msg
+viewForm pointer schema json =
+    case ( schema, json ) of
+        ( ValidSchema validSchema, ValidJson validJson errors ) ->
+            viewFormValid pointer validSchema errors validJson
+
+        _ ->
+            Html.text "Something is wrong"
+
+
+viewFormValid : Pointer -> JsonSchema.Schema -> List Validator.Error -> Value -> Html Msg
+viewFormValid pointer schema errors value =
+    let
+        validatedValue =
+            Validator.getValidatedValue pointer schema value
+    in
+    case ( validatedValue, schema ) of
+        ( Validator.StringValue errors string, JsonSchema.Model.String stringSchema ) ->
+            stringFormView pointer errors stringSchema string
+
+        ( _, JsonSchema.Model.String stringSchema ) ->
+            stringFormView pointer errors stringSchema ""
+
+        _ ->
+            Html.text "workin on it"
+
+
+stringFormView : Pointer -> List Validator.Error -> JsonSchema.Model.StringSchema -> String -> Html Msg
+stringFormView pointer errors stringSchema string =
+    Html.div []
+        [ Html.div []
+            [ viewJust label stringSchema.title
+            , Html.input
+                [ Html.Attributes.value string
+                , Html.Events.onInput (PatchJson pointer)
+                ]
+                []
+            ]
+        , Html.div [] (List.map (\a -> Html.div [] [ Html.text <| toString a ]) errors)
+        ]
+
+
+label : String -> Html Msg
 label string =
     Html.label [] [ Html.text string ]
 

@@ -48,11 +48,15 @@ init =
 
 exampleSchema : JsonSchema.Schema
 exampleSchema =
-    JsonSchema.string [ JsonSchema.title "sup" ]
+    JsonSchema.string
+        [ JsonSchema.title "sup"
+        , JsonSchema.minLength 2
+        , JsonSchema.enum [ "hi", "bye" ]
+        ]
 
 
 exampleJson : String
 exampleJson =
     """
-     "an example string"
+     "a"
      """
