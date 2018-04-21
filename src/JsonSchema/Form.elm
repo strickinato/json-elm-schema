@@ -145,8 +145,8 @@ view : Model -> Html Msg
 view model =
     Html.div []
         [ viewForm rootPointer model.schema model.json
-        , viewSchemaTextarea model.schema
         , viewJsonOutput model.json
+        , viewSchemaTextarea model.schema
         ]
 
 
@@ -155,7 +155,8 @@ viewSchemaTextarea schema =
     case schema of
         ValidSchema schema ->
             Html.div []
-                [ Html.textarea
+                [ Html.h2 [] [ Html.text "The Schema" ]
+                , Html.textarea
                     [ Html.Events.onInput SchemaChange
                     , Html.Attributes.value <| JsonSchema.Encoder.encode schema
                     , textareaSize
@@ -165,7 +166,8 @@ viewSchemaTextarea schema =
 
         InvalidSchema { intendedText, errorMessage } ->
             Html.div []
-                [ Html.div [] [ Html.text "This is total garbage" ]
+                [ Html.h2 [] [ Html.text "The Schema" ]
+                , Html.div [] [ Html.text "This is total garbage" ]
                 , Html.textarea
                     [ Html.Events.onInput SchemaChange
                     , Html.Attributes.value intendedText
@@ -180,7 +182,8 @@ viewJsonOutput json =
     case json of
         ValidJson json errors ->
             Html.div []
-                [ Html.textarea
+                [ Html.h2 [] [ Html.text "The JSON Output" ]
+                , Html.textarea
                     [ Html.Events.onInput DirectJsonChange
                     , Html.Attributes.value <| Json.Encode.encode 2 json
                     , textareaSize
@@ -190,7 +193,8 @@ viewJsonOutput json =
 
         InvalidJson { intendedText, errorMessage } ->
             Html.div []
-                [ Html.div [] [ Html.text "This is bad json" ]
+                [ Html.h2 [] [ Html.text "The JSON Output" ]
+                , Html.div [] [ Html.text "This is bad json" ]
                 , Html.div [] [ Html.text errorMessage ]
                 , Html.textarea
                     [ Html.Events.onInput DirectJsonChange
@@ -238,7 +242,7 @@ viewFormValid pointer schema errors value =
 
 stringFormView : Pointer -> List Validator.Error -> JsonSchema.Model.StringSchema -> String -> Html Msg
 stringFormView pointer errors stringSchema string =
-    Html.div []
+    Html.div [ Html.Attributes.style [ ( "fontSize", "18px" ) ] ]
         [ Html.div []
             [ viewJust label stringSchema.title
             , Html.input
@@ -247,13 +251,19 @@ stringFormView pointer errors stringSchema string =
                 ]
                 []
             ]
-        , Html.div [] (List.map (\a -> Html.div [] [ Html.text <| toString a ]) errors)
+        , Html.div [] <| List.map viewError errors
         ]
+
+
+viewError : Validator.Error -> Html Msg
+viewError error =
+    Html.div [ Html.Attributes.style [ ( "color", "red" ) ] ]
+        [ Html.text <| toString <| Tuple.second error ]
 
 
 label : String -> Html Msg
 label string =
-    Html.label [] [ Html.text string ]
+    Html.label [] [ Html.text (string ++ ": ") ]
 
 
 viewJust fn a =
