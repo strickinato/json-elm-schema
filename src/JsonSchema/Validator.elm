@@ -45,7 +45,7 @@ type ErrorMessage
 -}
 type ValidatedValue
     = Invalid (List Error)
-    | StringValue String
+    | StringValue (List Error) String
     | ArrayValue (Array.Array ValidatedValue)
     | TupleValue ( Int, Array.Array ValidatedValue )
     | ObjectValue (Dict String ValidatedValue)
@@ -345,51 +345,62 @@ validateTupleItems pointer items additionalItems values =
 {-| -}
 validateString : Pointer -> StringSchema -> String -> ValidatedValue
 validateString pointer schema string =
-    combineValidations (StringValue string)
+    combineValidationsTemp
+        StringValue
+        string
         [ validateMinLength pointer schema.minLength string
         , validateMaxLength pointer schema.maxLength string
         , validatePattern pointer schema.pattern string
-        , validateEnum StringValue pointer schema.enum string
+        , validateEnumTmp (StringValue []) pointer schema.enum string
         ]
+
+
+combineValidationsTemp : (List Error -> value -> ValidatedValue) -> value -> List ValidatedValue -> ValidatedValue
+combineValidationsTemp constructor value validations =
+    let
+        errors =
+            List.concatMap toErrors validations
+    in
+    constructor errors value
 
 
 validateMinLength : Pointer -> Maybe Int -> String -> ValidatedValue
 validateMinLength pointer minLength string =
     case minLength of
         Nothing ->
-            StringValue string
+            StringValue [] string
 
         Just minLength ->
             if String.length string >= minLength then
-                StringValue string
+                StringValue [] string
             else
-                Invalid [ ( pointer, IsShorterThan minLength ) ]
+                StringValue [ ( pointer, IsShorterThan minLength ) ] string
 
 
 validateMaxLength : Pointer -> Maybe Int -> String -> ValidatedValue
 validateMaxLength pointer maxLength string =
     case maxLength of
         Nothing ->
-            StringValue string
+            StringValue [] string
 
         Just maxLength ->
             if String.length string <= maxLength then
-                StringValue string
+                StringValue [] string
             else
-                Invalid [ ( pointer, IsLongerThan maxLength ) ]
+                StringValue [ ( pointer, IsLongerThan maxLength ) ] string
 
 
 validatePattern : Pointer -> Maybe String -> String -> ValidatedValue
 validatePattern pointer pattern string =
     case pattern of
         Nothing ->
-            StringValue string
+            StringValue [] string
 
         Just pattern ->
             if Regex.contains (Regex.regex pattern) string then
-                StringValue string
+                StringValue [] string
             else
-                Invalid [ ( pointer, DoesNotMatchPattern pattern ) ]
+                StringValue [ ( pointer, DoesNotMatchPattern pattern ) ] string
 
 
 validateEnum : (a -> ValidatedValue) -> Pointer -> Maybe (List a) -> a -> ValidatedValue
@@ -403,6 +414,19 @@ validateEnum constructor pointer enum value =
                 constructor value
             else
                 Invalid [ ( pointer, NotInEnumeration ) ]
+
+
+validateEnumTmp : (String -> ValidatedValue) -> Pointer -> Maybe (List String) -> String -> ValidatedValue
+validateEnumTmp constructor pointer enum value =
+    case enum of
+        Nothing ->
+            StringValue [] value
+
+        Just enum ->
+            if List.member value enum then
+                StringValue [] value
+            else
+                StringValue [ ( pointer, NotInEnumeration ) ] value
 
 
 validateInteger : Pointer -> IntegerSchema -> Int -> ValidatedValue
@@ -466,6 +490,9 @@ toErrors validatedValue =
             listErrors
 
         LazyValue listErrors ->
+            listErrors
+
+        StringValue listErrors _ ->
             listErrors
 
         ArrayValue values ->
